@@ -3,7 +3,7 @@
 import logging
 
 # Third party modules available via "pip install ..."
-import numpy
+import numpy as np
 import scipy.optimize
 
 
@@ -16,8 +16,23 @@ logger = logging.getLogger(__name__)
 class FitModel(object):
     names = False
     
-    def fit(self, x, y): 
-        self._params = scipy.optimize.curve_fit(self.func, x, y)
+    def fit(self, xdata, ydata, weights=None, stdevs=None):
+        if weights is not None:
+            assert stdevs is None
+            sigma = weights
+            abs_sigma = False
+        elif stdevs is not None:
+            assert weights is None
+            sigma = stdevs
+            abs_sigma = True
+        else:
+            sigma = None
+            abs_sigma = False
+
+        x = np.asarray(xdata)
+        y = np.asarray(ydata)
+        finite_x, finite_y = remove_invalid([x, y])
+        self.params, self.cov_arr = scipy.optimize.curve_fit(self.func, finite_x, finite_y, sigma=sigma, absolute_sigma=abs_sigma)
         self.xdata = x
         self.ydata = y
         return self
@@ -30,8 +45,11 @@ class FitModel(object):
             return [str(i) for i in range(len(self.params))]
             
     @property
-    def params(self):
-        return self._params[0]
+    def param_stdevs(self):
+        stdevs = []
+        for i in range(len(self.params)):
+            stdevs.append(np.sqrt(self.cov_arr[i, i]))
+        return stdevs
         
     def y(self, x):
         return self.func(x, *self.params)
@@ -76,7 +94,7 @@ class Sqrt(FitModel):
     equation_general = r'$m$.sqrt($x$) + $c$'
     
     def func(self, x, m, c):
-        return m * numpy.sqrt(x) + c
+        return m * np.sqrt(x) + c
  
  
    
@@ -86,7 +104,7 @@ class LogNatural(FitModel):
     equation_general = r'$m\log{x}+c$'
 
     def func(self, x, m, c):
-        return m * numpy.log(x) + c
+        return m * np.log(x) + c
 
 
 
@@ -96,7 +114,7 @@ class Log10(FitModel):
     equation_general = r'$m\log[10]{x}+c$'
 
     def func(self, x, m, c):
-        return m * numpy.log10(x) + c
+        return m * np.log10(x) + c
 
 
 
@@ -106,7 +124,7 @@ class Exponential(FitModel):
     equation_general = r'$Ae^x+c$'
 
     def func(self, x, m, c):
-        return m * numpy.exp(x) + c
+        return m * np.exp(x) + c
 
 
 
@@ -128,27 +146,27 @@ class Log10Log10(FitModel):
         
 #     def fit(self, x, y): 
 #         self.segments = []
-#         arg_indexes = numpy.argsort(x)
-#         x = numpy.array(x[arg_indexes])
-#         y = numpy.array(y[arg_indexes])
+#         arg_indexes = np.argsort(x)
+#         x = np.array(x[arg_indexes])
+#         y = np.array(y[arg_indexes])
 #         for i in range(1, len(x)):
 #             s = utils.NamedDict()
-#             s.x = numpy.array([x[i - 1], x[i]])
-#             s.y = numpy.array([y[i - 1], y[i]])
+#             s.x = np.array([x[i - 1], x[i]])
+#             s.y = np.array([y[i - 1], y[i]])
 #             s.model = self.piece_model_class().fit(s.x, s.y)
 #             self.segments.append(s)
 #         return self
             
 #     def y(self, x):
-#         x = numpy.asarray(x)
-#         y = numpy.ones_like(x) * numpy.nan
+#         x = np.asarray(x)
+#         y = np.ones_like(x) * np.nan
 #         last = self.segments[-1]
 #         for i in range(x.shape[0]):
 #             for j, s in enumerate(self.segments):
 #                 if x[i] >= s.x[0] and x[i] <= s.x[1]:
 #                     y[i] = s.model.y(x[i])
 #                     break
-#             if numpy.isnan(y[i]):
+#             if np.isnan(y[i]):
 #                 if x[i] < self.segments[0].x[1]:
 #                     y[i] = self.segments[0].model.y(x[i])
 #                 else:
@@ -159,3 +177,14 @@ class Log10Log10(FitModel):
 #     def equation_fitted(self):
 #         return '%s(%s)' % (self.name, self.piece_model_class.name)
         
+def remove_invalid(arrays):
+    assert len(arrays) > 0
+    n = len(arrays[0])
+    for arr in arrays[1:]:
+        assert len(arr) == n
+    
+    mask0 = np.isfinite(arrays[0])
+    masks = [np.isfinite(arr) for arr in arrays[1:]]
+    for mask in masks:
+        mask0 = mask0 & mask
+    return [np.array(arr[mask0]) for arr in arrays]
